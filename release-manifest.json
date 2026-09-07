@@ -1,0 +1,69 @@
+{
+  "version": "2026.09.07-967d975214",
+  "builtAt": "2026-09-07T14:24:31.775Z",
+  "channel": "github-pages",
+  "publicSource": true,
+  "browserLearningDataEmbedded": false,
+  "cleanInitialState": {
+    "wrongEntries": 0,
+    "customBooks": 0,
+    "historyRounds": 0
+  },
+  "files": [
+    {
+      "path": "site/.nojekyll",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "site/app.js",
+      "bytes": 61113,
+      "sha256": "0cdbc6c80c076c8559346a06a792a4811a53abe08ebf5186f72e36fe9b1610fc"
+    },
+    {
+      "path": "site/data.js",
+      "bytes": 871614,
+      "sha256": "465e530fe45783b70247d0b0b2c44666f6c85d2be6dbe6f232b1e796a8385335"
+    },
+    {
+      "path": "site/engine.js",
+      "bytes": 41245,
+      "sha256": "fd92b3cf41d11314b15787264d406f83197d3e534caf4884ca9ee2866223daf9"
+    },
+    {
+      "path": "site/index.html",
+      "bytes": 25582,
+      "sha256": "1eb30ea133f3294544dab2e2d780eadb3b43cd2b5c30e88afe2dd58e237ac350"
+    },
+    {
+      "path": "site/ipa-data.js",
+      "bytes": 1814385,
+      "sha256": "aa77c6a49fd6e3c7a849b8ca6471ea8f5d3e710ffa2dabe64b328b17fbd0ed9b"
+    },
+    {
+      "path": "site/lexicon.js",
+      "bytes": 1885,
+      "sha256": "c9497b36076cca716a46b1d13045ac807342d341400b16d244533fbdaef05901"
+    },
+    {
+      "path": "site/release.js",
+      "bytes": 96,
+      "sha256": "c9cb2623e46c3a8249d0325d56753c5cf979b5b6ebc22d3a5dabdecbfa47b35d"
+    },
+    {
+      "path": "site/styles.css",
+      "bytes": 56158,
+      "sha256": "5c621fef5bc0f148e567c4ebced4ee389bc4bf992308af55d3bf2c018f64b6fb"
+    },
+    {
+      "path": "site/theme-init.js",
+      "bytes": 336,
+      "sha256": "b8f506963422bc9e77f08b4e9b2bd34fccb86acfc72234b7db1857028200debf"
+    },
+    {
+      "path": "site/version.json",
+      "bytes": 73,
+      "sha256": "f3baa8c8a4715e16c481df59cf5d9bd0ff74971dd63a5e55b885996f8a0da2e9"
+    }
+  ]
+}

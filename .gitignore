@@ -1,0 +1,11 @@
+.DS_Store
+Thumbs.db
+node_modules/
+*.log
+听写备份*.json
+backup*/
+screenshots*/
+test-results*/
+*.doc
+*.docx
+*.pdf
