@@ -12,7 +12,7 @@
   const PAGE_SIZE = 50;
   const gridPageSize = () => window.innerWidth >= 1360 ? 52 : window.innerWidth >= 1101 ? 51 : 50;
   let storageError = '', toastTimer, saveTimer, voices = [], speechToken = 0, currentUtterance = null;
-  let speechWatchdog, speechStartTimer, view = 'home', bookPage = 0, wrongPage = 0, historyPage = 0, invalidAnswer = false;
+  let speechWatchdog, speechStartTimer, wrongReplayTimer, view = 'home', bookPage = 0, wrongPage = 0, historyPage = 0, invalidAnswer = false;
   let successTimer = 0, successState = null, historySessionId = null, historyWrongOnly = false;
   let vocabularyPageSize = gridPageSize(), layoutTimer = 0, peekTimer = 0, activePeek = null;
   let pendingReleaseVersion = '', updateNoticeShown = false;
@@ -118,7 +118,7 @@
   function populateBooks() {
     for (const target of [$('bookSelect'), $('libraryBookSelect')]) {
       target.replaceChildren();
-      for (const category of ['学术', '求职', '旅游', '租房']) {
+      for (const category of [...new Set(DATA.books.map((book) => book.category))]) {
         const group = document.createElement('optgroup'); group.label = category;
         for (const book of DATA.books.filter((b) => b.category === category)) group.append(new Option(`${book.name} · ${book.entries.length} 词`, book.id));
         target.append(group);
@@ -137,7 +137,7 @@
   }
 
   function cancelSpeech() {
-    speechToken++; clearTimeout(speechWatchdog); clearTimeout(speechStartTimer);
+    speechToken++; clearTimeout(speechWatchdog); clearTimeout(speechStartTimer); clearTimeout(wrongReplayTimer);
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     currentUtterance = null; document.querySelectorAll('.speaking').forEach((el) => { el.classList.remove('speaking'); el.removeAttribute('aria-busy'); });
   }
@@ -293,7 +293,17 @@
         const state = successState; clearSuccess(); renderRound(); save(); focusAnswer();
         if (!state?.complete && view === 'home') speak(engine.current()); else if (state?.complete) cancelSpeech();
       }, 500);
-    } else { renderRound(); save(); focusAnswer(); }
+    } else {
+      const roundId = engine.round().id;
+      engine.hint();
+      engine.round().invalid = true;
+      invalidAnswer = true;
+      renderRound(); save(); focusAnswer();
+      wrongReplayTimer = setTimeout(() => {
+        const round = engine.round();
+        if (view === 'home' && round.status === 'active' && round.id === roundId && round.queue[round.index] === submittedRef) speak(engine.current());
+      }, 180);
+    }
   }
 
   function hint() {

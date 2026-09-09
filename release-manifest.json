@@ -1,6 +1,6 @@
 {
-  "version": "2026.09.07-967d975214",
-  "builtAt": "2026-09-07T14:24:31.775Z",
+  "version": "2026.09.09-969ed4ee95",
+  "builtAt": "2026-09-09T04:58:12.063Z",
   "channel": "github-pages",
   "publicSource": true,
   "browserLearningDataEmbedded": false,
@@ -17,13 +17,13 @@
     },
     {
       "path": "site/app.js",
-      "bytes": 61113,
-      "sha256": "0cdbc6c80c076c8559346a06a792a4811a53abe08ebf5186f72e36fe9b1610fc"
+      "bytes": 61562,
+      "sha256": "a829f4892c4c29106df896c3ba2bf04a75db64b143bd4565ca77d19bf203e5ad"
     },
     {
       "path": "site/data.js",
-      "bytes": 871614,
-      "sha256": "465e530fe45783b70247d0b0b2c44666f6c85d2be6dbe6f232b1e796a8385335"
+      "bytes": 1243802,
+      "sha256": "a8df69957acb53f3b2c5c3cd910ddc509dae42022aa6e64608fb4f94f0451026"
     },
     {
       "path": "site/engine.js",
@@ -48,7 +48,7 @@
     {
       "path": "site/release.js",
       "bytes": 96,
-      "sha256": "c9cb2623e46c3a8249d0325d56753c5cf979b5b6ebc22d3a5dabdecbfa47b35d"
+      "sha256": "c25679ac6ab40222eeae90816e372fc41be293a469623bdfe1b6a23caa22df8b"
     },
     {
       "path": "site/styles.css",
@@ -63,7 +63,7 @@
     {
       "path": "site/version.json",
       "bytes": 73,
-      "sha256": "f3baa8c8a4715e16c481df59cf5d9bd0ff74971dd63a5e55b885996f8a0da2e9"
+      "sha256": "7d57928cd13958a68ce052b29b698a8b89e7627817e8082e15b4848ffffc5d88"
     }
   ]
 }
