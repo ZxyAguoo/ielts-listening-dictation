@@ -16,10 +16,10 @@
     constructor(data, saved) {
       this.data = data;
       this.state = {
-        version: 3, revision: 4,
+        version: 3, revision: 5,
         settings: { bookId: data.books[0].id, libraryBookId: data.books[0].id,
           voiceURI: '', order: 'sequential', hideEnglish: false, hideChinese: false,
-          theme: 'lavender', wrongSort: 'desc' },
+          theme: 'lavender', wrongSort: 'desc', practiceMode: 'dictation', typingSound: true },
         customBooks: [], rounds: {}, sessions: {}, wrong: {}, records: [], migrated: false,
       };
       this.reindex();
@@ -50,7 +50,7 @@
         throw new Error('备份格式不正确');
       }
       const state = clone(saved);
-      state.revision = 4;
+      state.revision = 5;
       state.customBooks ||= [];
       if (!Array.isArray(state.customBooks)) throw new Error('自定义词书数据不完整');
       const knownBookIds = new Set(this.data.books.map((book) => book.id));
@@ -93,6 +93,7 @@
         if (!safeKeys(session) || session.id !== id || typeof session.name !== 'string'
           || typeof session.startedAt !== 'string' || !Number.isInteger(session.total)
           || session.total < 0) throw new Error('轮次记录不完整');
+        session.mode = session.mode === 'spelling' ? 'spelling' : 'dictation';
       }
       if (!this.books.has(state.settings.bookId) && state.settings.bookId !== 'wrong') {
         state.settings.bookId = this.data.books[0].id;
@@ -102,6 +103,8 @@
       state.settings.theme = ['neutral', 'apricot', 'sage', 'blue', 'lavender', 'rose'].includes(state.settings.theme)
         ? state.settings.theme : 'lavender';
       state.settings.wrongSort = state.settings.wrongSort === 'asc' ? 'asc' : 'desc';
+      state.settings.practiceMode = state.settings.practiceMode === 'spelling' ? 'spelling' : 'dictation';
+      state.settings.typingSound = state.settings.typingSound !== false;
       for (const [key, item] of Object.entries(state.wrong)) {
         if (!validWord(item) || key !== item.id || !Number.isSafeInteger(item.count) || item.count < 1
           || typeof item.lastAt !== 'string' || typeof item.lastAnswer !== 'string'
@@ -117,6 +120,7 @@
           || typeof item.answer !== 'string' || typeof item.at !== 'string'
           || typeof item.correctAnswer !== 'string' || typeof item.bookName !== 'string'
           || !['correct', 'wrong', 'blank', 'hint'].includes(item.result)) throw new Error('听写记录不完整');
+        item.mode = item.mode === 'spelling' ? 'spelling' : 'dictation';
       }
       for (const [key, round] of Object.entries(state.rounds)) {
         if (!safeKeys(round) || !Array.isArray(round.queue) || !Array.isArray(round.results)
@@ -128,6 +132,7 @@
           || round.source !== key || !safeKeys(round.question) || typeof round.question.counted !== 'boolean'
           || typeof round.question.hinted !== 'boolean'
           || round.results.length !== round.index) throw new Error('听写进度不完整');
+        round.mode = round.mode === 'spelling' ? 'spelling' : 'dictation';
         if (round.legacyEntries && (!safeKeys(round.legacyEntries)
           || Object.values(round.legacyEntries).some((item) => !validWord(item)))) throw new Error('旧版词条快照不完整');
         round.groupSnapshots ||= [];
@@ -402,7 +407,8 @@
     sessionMetadata(round) {
       return { id: round.id, source: round.source, name: round.name || this.books.get(round.source)?.name || '错题本',
         startedAt: round.startedAt, completedAt: round.completedAt, status: round.status,
-        total: round.queue.length, parentId: round.parentId || null, reviewDepth: round.reviewDepth || 0 };
+        total: round.queue.length, parentId: round.parentId || null, reviewDepth: round.reviewDepth || 0,
+        mode: round.mode === 'spelling' ? 'spelling' : 'dictation' };
     }
 
     prepare(source, order = this.state.settings.order, options = {}) {
@@ -437,7 +443,8 @@
       }
       const queue = orderedUnits.flat();
       for (const ref of queue.filter((ref) => ref.startsWith('legacy/'))) legacyEntries[ref] ||= clone(resolve(ref));
-      this.state.rounds[source] = { id: makeId(), source, order, queue, baseQueue, index: 0, legacyEntries,
+      const mode = (options.mode || this.state.settings.practiceMode) === 'spelling' ? 'spelling' : 'dictation';
+      this.state.rounds[source] = { id: makeId(), source, order, mode, queue, baseQueue, index: 0, legacyEntries,
         groupSnapshots: snapshots.filter((group) => group.refs.every((ref) => baseQueue.includes(ref))),
         name: options.name || this.books.get(source)?.name || '错题本',
         parentId: options.parentId || null, reviewDepth: options.reviewDepth || 0,
@@ -452,6 +459,7 @@
       this.state.settings.bookId = source;
       const round = this.state.rounds[source] || (source === 'wrong' ? this.prepareWrong() : this.prepare(source));
       this.state.settings.order = round.order;
+      this.state.settings.practiceMode = round.mode === 'spelling' ? 'spelling' : 'dictation';
       return round;
     }
 
@@ -480,12 +488,19 @@
       if (this.round().order !== order) this.restart(order);
     }
 
-    restart(order = this.round().order) {
+    setPracticeMode(mode) {
+      if (!['dictation', 'spelling'].includes(mode)) return this.round();
+      this.state.settings.practiceMode = mode;
+      if (this.round().mode !== mode) return this.restart(this.round().order, mode);
+      return this.round();
+    }
+
+    restart(order = this.round().order, mode = this.round().mode || this.state.settings.practiceMode) {
       const round = this.round();
       return this.prepare(round.source, order, { refs: round.baseQueue || round.queue,
         name: round.name, parentId: round.parentId, reviewDepth: round.reviewDepth,
         groupSnapshots: round.groupSnapshots, legacyEntries: round.legacyEntries,
-        selectedWrongCount: round.selectedWrongCount });
+        selectedWrongCount: round.selectedWrongCount, mode });
     }
 
     prepareWrong(ids, metadata = {}) {
@@ -540,7 +555,8 @@
         wordId: row.id, word: row.word, ref: round.queue[round.index], bookId: round.source,
         bookName: round.name || this.books.get(round.source)?.name || '错题本', answer: round.answer,
         correctAnswer: row.word, result, at: stamp(), confusableGroupId: group?.id || null,
-        confusableIndex: group ? group.refs.indexOf(round.queue[round.index]) : null, confusableSize: group?.refs.length || null });
+        confusableIndex: group ? group.refs.indexOf(round.queue[round.index]) : null, confusableSize: group?.refs.length || null,
+        mode: round.mode === 'spelling' ? 'spelling' : 'dictation' });
     }
 
     markWrong(reason) {
@@ -587,6 +603,7 @@
       if (round.status !== 'active' || !row || !normalize(round.answer)) return { result: 'empty' };
       if (!this.accepts(row, round.answer)) {
         round.invalid = true;
+        if (round.mode === 'spelling') return { result: 'typing', row };
         this.markWrong('wrong');
         this.record('wrong');
         return { result: 'wrong', row };
@@ -617,7 +634,7 @@
         const id = legacy ? `legacy/${record.bookId || 'unknown'}/${record.at.slice(0, 10)}` : record.roundId;
         if (!groups.has(id)) groups.set(id, { id, source: record.bookId, name: record.bookName,
           startedAt: record.at, completedAt: null, status: legacy ? 'legacy' : 'archived',
-          total: null, inferredStart: true, records: [], questionMap: new Map() });
+          total: null, inferredStart: true, mode: record.mode === 'spelling' ? 'spelling' : 'dictation', records: [], questionMap: new Map() });
         const group = groups.get(id);
         if (group.inferredStart && record.at < group.startedAt) group.startedAt = record.at;
         group.records.push(record);

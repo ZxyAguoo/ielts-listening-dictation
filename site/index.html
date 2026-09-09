@@ -34,6 +34,10 @@
   <circle cx="6.5" cy="12.5" r=".5" fill="currentColor" />
   <circle cx="8.5" cy="7.5" r=".5" fill="currentColor" />
 </symbol>
+<symbol id="icon-settings" viewBox="0 0 24 24">
+  <path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" />
+  <circle cx="12" cy="12" r="3" />
+</symbol>
 <symbol id="icon-refresh-cw" viewBox="0 0 24 24">
   <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
   <path d="M21 3v5h-5" />
@@ -179,6 +183,13 @@
           </div>
         </div>
       </div>
+      <div class="settings-picker">
+        <button id="settingsButton" class="icon-button" type="button" aria-label="练习设置" aria-expanded="false" aria-controls="settingsPopover" data-tooltip="练习设置"><svg><use href="#icon-settings"></use></svg></button>
+        <div id="settingsPopover" class="settings-popover" aria-labelledby="settingsTitle" hidden>
+          <span id="settingsTitle" class="settings-title">练习设置</span>
+          <label class="setting-row" for="typingSoundToggle"><span><strong>打字音效</strong><small>输入时播放轻微按键音</small></span><input id="typingSoundToggle" type="checkbox" role="switch"></label>
+        </div>
+      </div>
       <input id="importFile" type="file" accept=".json,application/json" hidden>
     </div>
     <div id="voiceNotice" class="voice-notice global-voice-notice" role="status"></div>
@@ -187,6 +198,10 @@
     <section id="homeView" class="view home-view" aria-label="听写">
       <div class="session-toolbar">
         <label class="select-label"><span>听写内容</span><select id="bookSelect" aria-label="听写词书"></select></label>
+        <div class="practice-mode-field"><span>练习模式</span><div class="mode-control" aria-label="练习模式" role="group">
+          <button data-practice-mode="dictation" type="button" aria-pressed="true">听写</button>
+          <button data-practice-mode="spelling" type="button" aria-pressed="false">拼写</button>
+        </div></div>
         <div class="mode-control" aria-label="听写顺序" role="group">
           <button data-order="sequential" type="button" aria-pressed="true"><svg><use href="#icon-list-ordered"></use></svg>顺序</button>
           <button data-order="random" type="button" aria-pressed="false"><svg><use href="#icon-shuffle"></use></svg>乱序</button>
@@ -204,7 +219,7 @@
             <div id="hintAnswer" class="hint-answer" aria-live="polite"></div>
             <form id="answerForm" novalidate>
               <label for="answerInput" class="sr-only">英文拼写</label>
-              <div id="singleAnswerSlot"><textarea id="answerInput" rows="1" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-describedby="answerFeedback" lang="en" enterkeyhint="next"></textarea></div>
+              <div id="singleAnswerSlot"><div id="spellingPrompt" class="spelling-prompt" hidden></div><textarea id="answerInput" rows="1" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-describedby="answerFeedback" lang="en" enterkeyhint="next"></textarea></div>
               <div id="groupAnswerGrid" class="group-answer-grid" hidden></div>
               <button class="sr-only" type="submit" tabindex="-1">提交拼写</button>
             </form>

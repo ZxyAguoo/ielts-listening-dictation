@@ -271,3 +271,69 @@ main{width:100%;height:100%;min-height:0;overflow:hidden}
   .header-tools{grid-template-columns:repeat(6,32px);justify-content:end}
   .header-voice{grid-column:1/-1}
 }
+
+/* v3.7 spelling practice and local typing sounds */
+.settings-picker{position:relative;display:flex;align-items:center;width:100%}
+.settings-picker>.icon-button{width:100%}
+.settings-popover{position:absolute;z-index:65;width:260px;padding:16px;border:1px solid var(--line);border-radius:8px;background:var(--paper);box-shadow:0 18px 50px #2c243020}
+.settings-title{display:block;margin-bottom:12px;color:var(--muted);font-size:12px;font-weight:650}
+.setting-row{display:flex;align-items:center;justify-content:space-between;gap:18px;cursor:pointer}
+.setting-row>span{display:grid;gap:4px}.setting-row strong{font-size:13px}.setting-row small{color:var(--muted);font-size:10px;font-weight:400}
+.setting-row input{appearance:none;position:relative;width:38px;height:22px;flex:0 0 38px;border:1px solid var(--line);border-radius:12px;background:var(--progress-track);cursor:pointer;transition:background-color .15s ease,border-color .15s ease}
+.setting-row input::after{content:"";position:absolute;left:3px;top:3px;width:14px;height:14px;border-radius:50%;background:var(--paper);box-shadow:0 1px 4px #30253525;transition:transform .15s ease}
+.setting-row input:checked{border-color:var(--accent);background:var(--accent)}.setting-row input:checked::after{transform:translateX(16px)}
+.setting-row input:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.practice-mode-field{height:65px;display:grid;grid-template-rows:15px 42px;gap:8px}
+.practice-mode-field>span{padding-left:2px;color:var(--muted);font-size:11px}
+.session-toolbar{grid-template-columns:minmax(220px,300px) auto auto 42px;gap:12px}
+.session-toolbar .practice-mode-field .mode-control{margin:0}
+.spelling-mode{position:relative;width:min(940px,100%)!important}
+.spelling-mode #answerInput{position:absolute;left:50%;bottom:0;width:1px!important;height:1px!important;min-height:1px!important;padding:0;border:0;opacity:0;overflow:hidden;pointer-events:none}
+.spelling-prompt{width:100%;min-width:0}
+.spelling-target{min-width:0;text-align:center}
+.spelling-characters{display:flex;align-items:baseline;justify-content:center;flex-wrap:wrap;min-width:0;color:var(--ink);font-size:42px;font-weight:500;line-height:1.35}
+.spelling-target.word-long .spelling-characters{font-size:34px}.spelling-target.word-very-long .spelling-characters{font-size:27px}
+.spelling-char{display:inline-block;min-width:.56em;border-bottom:2px solid transparent;transition:color .1s ease,border-color .1s ease}
+.spelling-char.correct{color:var(--green)}.spelling-char.wrong{color:var(--red)}.spelling-char.pending{color:var(--ink)}
+.spelling-char.current{border-bottom-color:var(--accent)}.spelling-char.extra{min-width:auto}
+.space-mark{display:inline-block;width:.72em;color:var(--muted);font-size:.72em;text-align:center}
+.spelling-char.correct .space-mark{color:var(--green)}.spelling-char.wrong .space-mark{color:var(--red)}
+.spelling-ipa{display:block;margin-top:12px;color:var(--muted);font-size:14px;line-height:1.5}
+.spelling-target p{margin-top:10px;color:var(--ink);font-size:16px;font-weight:500;line-height:1.55;overflow-wrap:anywhere}
+.group-answer-slot.group-spelling-slot{min-height:116px;padding:12px 10px 10px;border-bottom:1.5px solid var(--input-line)}
+.group-answer-slot.group-spelling-slot:has(#answerInput){border-bottom-color:var(--accent);box-shadow:none}
+.group-spelling-slot>.group-position{left:2px;top:12px;transform:none}
+.group-spelling-slot .spelling-characters{font-size:25px;line-height:1.3}
+.group-spelling-slot .spelling-target.word-long .spelling-characters{font-size:21px}.group-spelling-slot .spelling-target.word-very-long .spelling-characters{font-size:18px}
+.group-spelling-slot .spelling-ipa{margin-top:7px;font-size:11px}.group-spelling-slot .spelling-target p{margin-top:5px;font-size:12px}
+.home-view[data-practice-mode="spelling"] .hint-answer{display:none}
+.home-view[data-practice-mode="spelling"] .practice-actions{margin-top:22px}
+.history-mode{display:inline-block;margin-left:7px;padding:2px 5px;border-radius:4px;background:var(--soft);color:var(--accent);font-size:9px;font-style:normal;font-weight:600;vertical-align:2px}
+
+@media(min-width:901px){
+  .header-tools{grid-template-columns:repeat(5,minmax(0,1fr))}
+  .header-tools>.settings-picker>.icon-button{height:34px;padding:7px}
+  .settings-popover{left:calc(100% + 14px);bottom:0}
+}
+
+@media(max-width:900px){
+  .header-tools{grid-template-columns:minmax(120px,1fr) repeat(5,34px)}
+  .settings-popover{right:0;top:calc(100% + 10px)}
+}
+
+@media(max-width:650px){
+  .header-tools{grid-template-columns:minmax(110px,1fr) repeat(5,32px);justify-content:end}
+  .header-voice{grid-column:auto}
+  .session-toolbar{grid-template-columns:auto auto 38px;gap:9px 7px;justify-content:center}
+  .session-toolbar .select-label{grid-column:1/-1;grid-row:1}
+  .practice-mode-field{grid-column:1;grid-row:2;height:58px;grid-template-rows:12px 38px;gap:8px}
+  .session-toolbar>.mode-control{grid-column:2;grid-row:2;align-self:end}
+  .session-toolbar>.icon-button{grid-column:3;grid-row:2;align-self:end;width:38px;height:38px;padding:9px}
+  .session-toolbar .mode-control{height:38px}.session-toolbar .mode-control button{min-width:52px;padding:0 7px;font-size:11px}
+  .spelling-characters{font-size:29px}.spelling-target.word-long .spelling-characters{font-size:24px}.spelling-target.word-very-long .spelling-characters{font-size:20px}
+  .spelling-ipa{margin-top:8px;font-size:12px}.spelling-target p{margin-top:6px;font-size:14px}
+  .group-answer-slot.group-spelling-slot{min-height:94px;padding:10px 5px 7px}
+  .group-spelling-slot .spelling-characters{font-size:18px}.group-spelling-slot .spelling-target.word-long .spelling-characters{font-size:16px}.group-spelling-slot .spelling-target.word-very-long .spelling-characters{font-size:14px}
+  .group-spelling-slot .spelling-ipa{font-size:9px}.group-spelling-slot .spelling-target p{font-size:10px}
+  .settings-popover{right:0;width:min(260px,calc(100vw - 24px))}
+}

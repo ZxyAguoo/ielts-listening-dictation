@@ -15,6 +15,7 @@
   let speechWatchdog, speechStartTimer, wrongReplayTimer, view = 'home', bookPage = 0, wrongPage = 0, historyPage = 0, invalidAnswer = false;
   let successTimer = 0, successState = null, historySessionId = null, historyWrongOnly = false;
   let vocabularyPageSize = gridPageSize(), layoutTimer = 0, peekTimer = 0, activePeek = null;
+  let audioContext = null, spellingErrorActive = false, pendingInputSound = '';
   let pendingReleaseVersion = '', updateNoticeShown = false;
   const wrongSelection = new Set();
   let managingBookId = null, editingEntryId = null, batchPreview = [], singleIpaSource = 'unavailable', confusableIpaSource = 'unavailable';
@@ -69,6 +70,44 @@
   function closeThemePicker(returnFocus = false) {
     $('themePopover').hidden = true; $('themeButton').setAttribute('aria-expanded', 'false');
     if (returnFocus) $('themeButton').focus();
+  }
+  function closeSettings(returnFocus = false) {
+    $('settingsPopover').hidden = true; $('settingsButton').setAttribute('aria-expanded', 'false');
+    if (returnFocus) $('settingsButton').focus();
+  }
+  function audioEngine() {
+    if (!engine.state.settings.typingSound) return null;
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return null;
+    audioContext ||= new AudioContext();
+    if (audioContext.state === 'suspended') audioContext.resume?.();
+    return audioContext;
+  }
+  function playTypingSound(type = 'key') {
+    const context = audioEngine(); if (!context) return;
+    const now = context.currentTime, oscillator = context.createOscillator(), gain = context.createGain();
+    oscillator.connect(gain); gain.connect(context.destination);
+    if (type === 'error') {
+      oscillator.type = 'sine'; oscillator.frequency.setValueAtTime(520, now);
+      oscillator.frequency.exponentialRampToValueAtTime(390, now + 0.1);
+      gain.gain.setValueAtTime(0.055, now); gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+      oscillator.start(now); oscillator.stop(now + 0.125);
+    } else {
+      oscillator.type = 'triangle'; oscillator.frequency.setValueAtTime(1180, now);
+      gain.gain.setValueAtTime(0.022, now); gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.025);
+      oscillator.start(now); oscillator.stop(now + 0.03);
+    }
+  }
+  const typingText = (value) => String(value ?? '').normalize('NFKC').toLowerCase().replace(/[’‘]/g, "'");
+  function typingStatus(row, answer) {
+    const target = typingText(row?.word), value = typingText(answer);
+    let wrong = value.length > target.length;
+    for (let i = 0; i < value.length && i < target.length; i++) if (value[i] !== target[i]) { wrong = true; break; }
+    return { wrong, complete: Boolean(target) && value === target };
+  }
+  function prospectiveAnswer(input, text) {
+    const start = input.selectionStart ?? input.value.length, end = input.selectionEnd ?? start;
+    return input.value.slice(0, start) + text + input.value.slice(end);
   }
   function resetListScroll(id) { const target = $(id); if (target) target.scrollTop = 0; }
   const isMac = () => /Macintosh|Mac OS X/i.test(navigator.userAgent || '');
@@ -134,6 +173,7 @@
     $('libraryBookSelect').value = engine.state.settings.libraryBookId;
     $('hideEnglish').checked = Boolean(engine.state.settings.hideEnglish);
     $('hideChinese').checked = Boolean(engine.state.settings.hideChinese);
+    $('typingSoundToggle').checked = engine.state.settings.typingSound !== false;
   }
 
   function cancelSpeech() {
@@ -187,6 +227,7 @@
 
   function clearSuccess() {
     clearTimeout(successTimer); successTimer = 0; successState = null;
+    spellingErrorActive = false; pendingInputSound = '';
     $('answerInput').readOnly = false; $('answerInput').classList.remove('correct');
   }
 
@@ -203,21 +244,50 @@
     $('bookSelect').querySelector('option[value="wrong"]').textContent = `错题本 · ${count} 词`;
   }
   function focusAnswer() { if (view === 'home' && engine.round().status === 'active') $('answerInput').focus({ preventScroll: true }); }
-  function fitAnswer() { const input = $('answerInput'); input.style.height = 'auto'; input.style.height = `${Math.max(innerWidth <= 650 ? 60 : 70, Math.min(180, input.scrollHeight))}px`; }
+  function fitAnswer() {
+    const input = $('answerInput');
+    if (engine.round().mode === 'spelling') { input.style.height = '1px'; return; }
+    input.style.height = 'auto'; input.style.height = `${Math.max(innerWidth <= 650 ? 60 : 70, Math.min(180, input.scrollHeight))}px`;
+  }
+  function spellingTargetMarkup(row, answer = '', forceComplete = false) {
+    if (!row) return '';
+    const displayed = Array.from(row.word), target = Array.from(typingText(row.word)), value = Array.from(typingText(answer));
+    const characters = displayed.map((character, index) => {
+      const entered = index < value.length;
+      const state = forceComplete ? 'correct' : !entered ? 'pending' : value[index] === target[index] ? 'correct' : 'wrong';
+      const content = character === ' ' ? '<span class="space-mark" aria-hidden="true">_</span>' : esc(character);
+      return `<span class="spelling-char ${state}${!forceComplete && index === value.length ? ' current' : ''}">${content}</span>`;
+    });
+    if (!forceComplete && value.length > displayed.length) {
+      for (const character of value.slice(displayed.length)) characters.push(`<span class="spelling-char wrong extra">${character === ' ' ? '<span class="space-mark">_</span>' : esc(character)}</span>`);
+    }
+    const ipa = row.ipaUK ? `<span class="spelling-ipa">${esc(row.ipaUK)}</span>` : '';
+    return `<div class="spelling-target ${wordSizeClass(row.word)}" aria-label="跟打 ${esc(row.word)}"><div class="spelling-characters" aria-hidden="true">${characters.join('')}</div>${ipa}<p>${esc(row.translation || '')}</p></div>`;
+  }
   function renderAnswerArea(round, showingSuccess) {
-    const input = $('answerInput'), grid = $('groupAnswerGrid'), single = $('singleAnswerSlot');
+    const input = $('answerInput'), grid = $('groupAnswerGrid'), single = $('singleAnswerSlot'), prompt = $('spellingPrompt');
     if (!single.contains(input)) single.append(input);
     grid.replaceChildren();
     const focusRef = showingSuccess ? successState.ref : round.queue[round.index];
     const group = focusRef ? engine.groupForRef(focusRef, round) : null;
-    $('answerForm').classList.toggle('grouped', Boolean(group));
+    const spelling = round.mode === 'spelling';
+    $('answerForm').classList.toggle('grouped', Boolean(group)); $('answerForm').classList.toggle('spelling-mode', spelling);
     single.hidden = Boolean(group); grid.hidden = !group;
-    if (!group) return null;
+    prompt.hidden = !spelling || Boolean(group);
+    if (!group) {
+      prompt.innerHTML = spelling ? spellingTargetMarkup(showingSuccess ? successState.row : engine.current(), showingSuccess ? successState.answer : round.answer, showingSuccess) : '';
+      return null;
+    }
     grid.dataset.size = String(group.refs.length);
     for (const [index, ref] of group.refs.entries()) {
       const result = round.results.find((item) => item.ref === ref), slot = document.createElement('div');
-      slot.className = 'group-answer-slot'; slot.innerHTML = `<span>${index + 1}</span>`;
-      if (ref === focusRef) slot.append(input);
+      const row = engine.entry(ref) || group.members[index];
+      slot.className = `group-answer-slot${spelling ? ' group-spelling-slot' : ''}`; slot.innerHTML = `<span class="group-position">${index + 1}</span>`;
+      if (spelling) {
+        const activeAnswer = ref === focusRef ? (showingSuccess ? successState.answer : round.answer) : result?.answer || '';
+        slot.insertAdjacentHTML('beforeend', spellingTargetMarkup(row, activeAnswer, Boolean(result) || (showingSuccess && ref === focusRef)));
+        if (ref === focusRef) slot.append(input);
+      } else if (ref === focusRef) slot.append(input);
       else {
         const line = document.createElement('textarea'); line.rows = 1; line.readOnly = true; line.tabIndex = -1;
         line.className = `group-answer-line ${result ? 'correct completed' : 'pending'}`;
@@ -241,15 +311,18 @@
   }
   function renderRound() {
     const round = engine.round(); invalidAnswer = Boolean(round.invalid); const summary = engine.summary(); $('bookSelect').value = engine.state.settings.bookId;
+    const spelling = round.mode === 'spelling';
     const showingSuccess = successState?.roundId === round.id;
     const completeVisible = round.status === 'complete' && !showingSuccess;
     document.querySelectorAll('[data-order]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.order === round.order)));
+    document.querySelectorAll('[data-practice-mode]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.practiceMode === round.mode)));
+    $('homeView').dataset.practiceMode = round.mode;
     $('readyState').hidden = round.status !== 'ready'; $('activeState').hidden = round.status !== 'active' && !showingSuccess; $('completeState').hidden = round.status !== 'complete' || showingSuccess;
     $('practiceStage').classList.toggle('complete-mode', completeVisible); $('practiceCenter').classList.toggle('complete-mode', completeVisible); $('previousWord').hidden = completeVisible;
-    $('readyBook').textContent = round.name || bookName(round.source); $('readyTitle').textContent = round.queue.length ? '准备听写' : round.source === 'wrong' ? '暂无错题' : '暂无词条';
+    $('readyBook').textContent = round.name || bookName(round.source); $('readyTitle').textContent = round.queue.length ? (spelling ? '准备拼写' : '准备听写') : round.source === 'wrong' ? '暂无错题' : '暂无词条';
     $('readyCount').textContent = round.queue.length ? (round.source === 'wrong' && round.selectedWrongCount && round.selectedWrongCount !== round.queue.length
       ? `选择了 ${round.selectedWrongCount} 个错词，扩展为 ${round.queue.length} 个听写词` : `${round.queue.length} 个单词`) : '';
-    $('startButton').hidden = !round.queue.length; $('restartButton').disabled = !round.queue.length; $('previousWord').replaceChildren();
+    $('startButton').hidden = !round.queue.length; $('startButton').querySelector('span').textContent = spelling ? '开始拼写' : '开始听写'; $('restartButton').disabled = !round.queue.length; $('previousWord').replaceChildren();
     const focusRef = showingSuccess ? successState.ref : round.queue[round.index];
     const displayGroup = focusRef ? engine.groupForRef(focusRef, round) : null;
     const groupStart = displayGroup ? Math.min(...displayGroup.refs.map((ref) => round.queue.indexOf(ref)).filter((index) => index >= 0)) : -1;
@@ -258,20 +331,24 @@
     const previous = previousResult ? engine.entry(previousResult.ref) : null;
     if (previous && !completeVisible) $('previousWord').innerHTML = `<button type="button" data-play="${esc(previousResult.ref)}" aria-label="重读上一词 ${esc(previous.word)}">${icon('corner-up-left')}${esc(previous.word)}</button><div class="ipa">${esc(previous.ipaUK)}</div><p>${esc(previous.translation)}</p>`;
     const row = showingSuccess ? successState.row : engine.current();
-    $('hintAnswer').innerHTML = !showingSuccess && round.question.hinted && row ? `<span>${esc(row.word)}</span><span class="ipa">${esc(row.ipaUK)}</span>` : '';
+    $('hintAnswer').innerHTML = !spelling && !showingSuccess && round.question.hinted && row ? `<span>${esc(row.word)}</span><span class="ipa">${esc(row.ipaUK)}</span>` : '';
     $('answerInput').value = showingSuccess ? successState.answer : round.answer;
     $('answerInput').readOnly = showingSuccess;
+    const liveTyping = spelling && !showingSuccess && row ? typingStatus(row, round.answer) : { wrong: false };
+    if (spelling && !showingSuccess) { invalidAnswer = liveTyping.wrong; spellingErrorActive = liveTyping.wrong; }
     $('answerInput').classList.toggle('invalid', !showingSuccess && invalidAnswer);
     $('answerInput').classList.toggle('correct', showingSuccess);
     $('answerInput').setAttribute('aria-invalid', String(!showingSuccess && invalidAnswer));
-    $('answerFeedback').textContent = showingSuccess ? '拼写正确' : invalidAnswer ? '拼写不正确' : '';
+    $('answerFeedback').textContent = showingSuccess ? '拼写正确' : invalidAnswer ? (spelling ? '字符有误，请退格修改' : '拼写不正确') : '';
     $('answerFeedback').classList.toggle('correct', showingSuccess);
-    $('hintButton').disabled = showingSuccess;
+    $('hintButton').hidden = spelling; $('hintButton').disabled = showingSuccess || spelling;
     renderAnswerArea(round, showingSuccess);
     $('progressBook').textContent = round.name || bookName(round.source); $('progressBar').max = Math.max(1, summary.total); $('progressBar').value = summary.done; $('progressCount').textContent = `${summary.done} / ${summary.total}`;
-    $('completeStats').innerHTML = `<div><strong>${summary.done}</strong><span>完成单词</span></div><div><strong>${summary.firstTry}</strong><span>首次正确</span></div><div><strong>${summary.review}</strong><span>需要复习</span></div>`;
+    $('completeStats').innerHTML = spelling
+      ? `<div><strong>${summary.done}</strong><span>完成单词</span></div><div><strong>${summary.total}</strong><span>本轮词数</span></div>`
+      : `<div><strong>${summary.done}</strong><span>完成单词</span></div><div><strong>${summary.firstTry}</strong><span>首次正确</span></div><div><strong>${summary.review}</strong><span>需要复习</span></div>`;
     renderRoundReview(round);
-    $('reviewRoundButton').disabled = summary.review === 0; fitAnswer(); syncVoiceButtons(); updateBadge();
+    $('reviewRoundButton').hidden = spelling; $('reviewRoundButton').disabled = spelling || summary.review === 0; fitAnswer(); syncVoiceButtons(); updateBadge();
     if (pendingReleaseVersion && round.status === 'complete' && updateNoticeShown) {
       updateNoticeShown = false; toast('本轮已完成。可点击侧栏的更新按钮加载新版本。', 8000);
     }
@@ -279,7 +356,15 @@
   function start() {
     refreshVoices();
     if (!voices.length) { toast('请先选择可用的英式声音。'); return; }
-    if (engine.start()) { invalidAnswer = false; renderRound(); save(); focusAnswer(); speak(engine.current()); }
+    if (engine.start()) { invalidAnswer = false; spellingErrorActive = false; renderRound(); save(); focusAnswer(); speak(engine.current()); }
+  }
+  function showCorrect(result, submittedRef, answer, delay) {
+    successState = { roundId: engine.round().id, ref: submittedRef, row: result.row, answer, complete: result.complete };
+    spellingErrorActive = false; renderRound(); save();
+    successTimer = setTimeout(() => {
+      const state = successState; clearSuccess(); renderRound(); save(); focusAnswer();
+      if (!state?.complete && view === 'home') speak(engine.current()); else if (state?.complete) cancelSpeech();
+    }, delay);
   }
   function submit() {
     if (successState) return;
@@ -287,13 +372,9 @@
     engine.setAnswer($('answerInput').value); const result = engine.submit(); if (result.result === 'empty') return;
     invalidAnswer = result.result === 'wrong';
     if (result.result === 'correct') {
-      successState = { roundId: engine.round().id, ref: submittedRef, row: result.row, answer: $('answerInput').value, complete: result.complete };
-      renderRound(); save();
-      successTimer = setTimeout(() => {
-        const state = successState; clearSuccess(); renderRound(); save(); focusAnswer();
-        if (!state?.complete && view === 'home') speak(engine.current()); else if (state?.complete) cancelSpeech();
-      }, 500);
+      showCorrect(result, submittedRef, $('answerInput').value, 500);
     } else {
+      playTypingSound('error');
       const roundId = engine.round().id;
       engine.hint();
       engine.round().invalid = true;
@@ -304,6 +385,15 @@
         if (view === 'home' && round.status === 'active' && round.id === roundId && round.queue[round.index] === submittedRef) speak(engine.current());
       }, 180);
     }
+  }
+
+  function finishSpelling() {
+    if (successState || engine.round().mode !== 'spelling') return;
+    const row = engine.current(), answer = $('answerInput').value;
+    if (!row || !typingStatus(row, answer).complete) return;
+    const submittedRef = engine.round().queue[engine.round().index];
+    engine.setAnswer(answer); const result = engine.submit();
+    if (result.result === 'correct') showCorrect(result, submittedRef, answer, 600);
   }
 
   function hint() {
@@ -395,14 +485,15 @@
       historyPage = Math.min(historyPage, Math.max(0, Math.ceil(rows.length / PAGE_SIZE) - 1)); $('historyCount').textContent = `${rows.length} 轮`;
       $('historyRows').innerHTML = rows.slice(historyPage * PAGE_SIZE, (historyPage + 1) * PAGE_SIZE).map((item) => {
         const status = item.status === 'complete' ? '已完成' : item.status === 'active' ? '进行中' : item.status === 'legacy' ? '旧版导入' : '已结束';
-        return `<tr><td><button class="session-link" data-history-open="${esc(item.id)}"><strong>${esc(item.name)}</strong><span>${esc(timeText(item.startedAt))}${item.inferredStart ? ' · 由首条记录恢复' : ''}</span></button></td><td class="result-correct">${item.correct}</td><td><button class="wrong-count-link" data-history-open="${esc(item.id)}" data-history-wrong="true" ${item.wrong ? '' : 'disabled'}>${item.wrong}</button></td><td><span>${item.done} / ${item.total}</span><small>${status}</small></td><td><button class="icon-button" data-history-open="${esc(item.id)}" aria-label="查看本轮"><svg><use href="#icon-chevron-right"></use></svg></button></td></tr>`;
+        const mode = item.mode === 'spelling' ? '拼写' : '听写';
+        return `<tr><td><button class="session-link" data-history-open="${esc(item.id)}"><strong>${esc(item.name)}<em class="history-mode">${mode}</em></strong><span>${esc(timeText(item.startedAt))}${item.inferredStart ? ' · 由首条记录恢复' : ''}</span></button></td><td class="result-correct">${item.correct}</td><td><button class="wrong-count-link" data-history-open="${esc(item.id)}" data-history-wrong="true" ${item.wrong ? '' : 'disabled'}>${item.wrong}</button></td><td><span>${item.done} / ${item.total}</span><small>${status}</small></td><td><button class="icon-button" data-history-open="${esc(item.id)}" aria-label="查看本轮"><svg><use href="#icon-chevron-right"></use></svg></button></td></tr>`;
       }).join('');
       $('historyEmpty').hidden = rows.length !== 0; $('historyEmpty').textContent = query ? '没有找到匹配的听写轮次' : '暂无听写记录';
       paginate($('historyPagination'), rows.length, historyPage, (page) => { historyPage = page; renderHistory(); });
       return;
     }
     $('historyAllWords').setAttribute('aria-pressed', String(!historyWrongOnly)); $('historyWrongWords').setAttribute('aria-pressed', String(historyWrongOnly));
-    $('historyRoundMeta').textContent = `${timeText(session.startedAt)} · 完成 ${session.done}/${session.total} · 首次正确 ${session.correct} · 错题 ${session.wrong}`;
+    $('historyRoundMeta').textContent = `${session.mode === 'spelling' ? '拼写' : '听写'} · ${timeText(session.startedAt)} · 完成 ${session.done}/${session.total} · 首次正确 ${session.correct} · 错题 ${session.wrong}`;
     const questions = session.questions.filter((item) => (!historyWrongOnly || item.wrong) && normalize(`${item.word} ${item.records.map((r) => r.answer).join(' ')}`).includes(query));
     historyPage = Math.min(historyPage, Math.max(0, Math.ceil(questions.length / PAGE_SIZE) - 1)); $('historyCount').textContent = `${questions.length} 词`;
     $('historyDetailRows').innerHTML = questions.slice(historyPage * PAGE_SIZE, (historyPage + 1) * PAGE_SIZE).map((question) => {
@@ -586,18 +677,59 @@
   $('libraryBookSelect').addEventListener('change', () => { engine.state.settings.libraryBookId = $('libraryBookSelect').value; bookPage = 0; $('bookSearch').value = ''; save(); renderBooks(); resetListScroll('bookListScroll'); });
   $('voiceSelect').addEventListener('change', () => { cancelSpeech(); engine.state.settings.voiceURI = $('voiceSelect').value; save(); refreshVoices(); });
   document.querySelectorAll('[data-order]').forEach((button) => button.addEventListener('click', () => { if (engine.round().order === button.dataset.order) return; cancelSpeech(); clearSuccess(); engine.setOrder(button.dataset.order); invalidAnswer = false; renderRound(); save(); }));
+  document.querySelectorAll('[data-practice-mode]').forEach((button) => button.addEventListener('click', () => {
+    const mode = button.dataset.practiceMode, round = engine.round(); if (round.mode === mode) return;
+    if (round.status === 'active' && !confirm('切换练习模式会保存并结束当前轮次，然后从头开始。是否继续？')) { renderRound(); return; }
+    cancelSpeech(); clearSuccess(); engine.setPracticeMode(mode); invalidAnswer = false; spellingErrorActive = false; renderRound(); save(); focusAnswer();
+  }));
   $('startButton').onclick = start; $('againButton').onclick = start;
   $('restartButton').onclick = () => { cancelSpeech(); clearSuccess(); engine.restart(); invalidAnswer = false; renderRound(); save(); };
   $('replayButton').onclick = () => { speak(successState?.row || engine.current(), $('replayButton')); focusAnswer(); };
   $('hintButton').onclick = hint;
-  $('answerForm').addEventListener('submit', (event) => { event.preventDefault(); normalize($('answerInput').value) ? submit() : hint(); });
+  $('answerForm').addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (engine.round().mode === 'spelling') { finishSpelling(); return; }
+    normalize($('answerInput').value) ? submit() : hint();
+  });
+  $('answerForm').addEventListener('pointerdown', () => { if (engine.round().mode === 'spelling') setTimeout(focusAnswer, 0); });
   $('answerInput').addEventListener('keydown', (event) => {
     if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
       event.preventDefault(); if (!event.repeat) speak(successState?.row || engine.current(), $('replayButton')); return;
     }
-    if (event.key === 'Enter' && !event.isComposing && event.keyCode !== 229) { event.preventDefault(); if (!event.repeat) normalize($('answerInput').value) ? submit() : hint(); }
+    pendingInputSound = '';
+    if (!event.repeat && !event.isComposing && event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) {
+      if (engine.round().mode === 'spelling') {
+        if (!spellingErrorActive) {
+          const status = typingStatus(engine.current(), prospectiveAnswer($('answerInput'), event.key));
+          pendingInputSound = status.wrong ? 'error' : 'key'; playTypingSound(pendingInputSound);
+        }
+      } else { pendingInputSound = 'key'; playTypingSound('key'); }
+    }
+    if (event.key === 'Enter' && !event.isComposing && event.keyCode !== 229) {
+      event.preventDefault(); if (event.repeat) return;
+      if (engine.round().mode === 'spelling') { finishSpelling(); return; }
+      normalize($('answerInput').value) ? submit() : hint();
+    }
   });
-  $('answerInput').addEventListener('input', () => { engine.setAnswer($('answerInput').value); invalidAnswer = false; $('answerInput').classList.remove('invalid'); $('answerInput').setAttribute('aria-invalid', 'false'); $('answerFeedback').textContent = ''; fitAnswer(); autosave(); });
+  $('answerInput').addEventListener('input', () => {
+    const round = engine.round(), row = engine.current(); engine.setAnswer($('answerInput').value);
+    if (round.mode === 'spelling' && row) {
+      const wasWrong = spellingErrorActive, status = typingStatus(row, $('answerInput').value);
+      spellingErrorActive = status.wrong; invalidAnswer = status.wrong;
+      if (status.wrong && !wasWrong) {
+        if (pendingInputSound !== 'error') playTypingSound('error');
+        const roundId = round.id, ref = round.queue[round.index]; clearTimeout(wrongReplayTimer);
+        wrongReplayTimer = setTimeout(() => {
+          const active = engine.round();
+          if (view === 'home' && active.status === 'active' && active.id === roundId && active.queue[active.index] === ref) speak(engine.current());
+        }, 90);
+      }
+      pendingInputSound = '';
+      if (status.complete) { finishSpelling(); return; }
+      renderRound(); autosave(); focusAnswer(); return;
+    }
+    invalidAnswer = false; $('answerInput').classList.remove('invalid'); $('answerInput').setAttribute('aria-invalid', 'false'); $('answerFeedback').textContent = ''; fitAnswer(); pendingInputSound = ''; autosave();
+  });
   $('practiceBookButton').onclick = () => practice(engine.state.settings.libraryBookId);
   $('practiceWrongButton').onclick = () => practiceWrong([...wrongSelection]);
   $('practiceAllWrongButton').onclick = () => practiceWrong();
@@ -629,6 +761,7 @@
     const open = path.find((el) => el?.matches?.('[data-history-open]'));
     if (open) { historySessionId = open.dataset.historyOpen; historyWrongOnly = open.dataset.historyWrong === 'true'; historyPage = 0; $('historySearch').value = ''; renderHistory(); }
     if (!path.includes($('themePopover')) && !path.includes($('themeButton'))) closeThemePicker();
+    if (!path.includes($('settingsPopover')) && !path.includes($('settingsButton'))) closeSettings();
   });
   document.addEventListener('pointerdown', (event) => {
     const button = event.target.closest?.('[data-peek]');
@@ -663,8 +796,19 @@
   document.querySelectorAll('dialog').forEach((dialog) => dialog.addEventListener('click', (event) => { if (event.target === dialog) { const rect = dialog.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close(); } }));
   $('exportButton').onclick = () => exportBackup(); $('importButton').onclick = () => $('importFile').click();
   $('themeButton').onclick = () => {
+    closeSettings();
     const opening = $('themePopover').hidden; $('themePopover').hidden = !opening; $('themeButton').setAttribute('aria-expanded', String(opening));
     if (opening) document.querySelector(`[data-theme-option="${engine.state.settings.theme}"]`)?.focus();
+  };
+  $('settingsButton').onclick = () => {
+    closeThemePicker();
+    const opening = $('settingsPopover').hidden; $('settingsPopover').hidden = !opening; $('settingsButton').setAttribute('aria-expanded', String(opening));
+    if (opening) $('typingSoundToggle').focus();
+  };
+  $('typingSoundToggle').onchange = () => {
+    engine.state.settings.typingSound = $('typingSoundToggle').checked; save();
+    if (!engine.state.settings.typingSound && audioContext?.state === 'running') audioContext.suspend?.();
+    toast(engine.state.settings.typingSound ? '打字音效已开启' : '打字音效已关闭');
   };
   document.querySelectorAll('[data-theme-option]').forEach((button) => button.onclick = () => { applyTheme(button.dataset.themeOption, true); closeThemePicker(true); });
   $('themePopover').addEventListener('keydown', (event) => {
@@ -673,7 +817,11 @@
     const index = event.key === 'Home' ? 0 : event.key === 'End' ? options.length - 1 : (current + (event.key === 'ArrowRight' ? 1 : -1) + options.length) % options.length;
     options[index].focus();
   });
-  document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !$('themePopover').hidden) { event.preventDefault(); closeThemePicker(true); } });
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    if (!$('themePopover').hidden) { event.preventDefault(); closeThemePicker(true); }
+    else if (!$('settingsPopover').hidden) { event.preventDefault(); closeSettings(true); }
+  });
   $('importFile').onchange = async () => {
     const file = $('importFile').files[0]; if (!file) return;
     try {
