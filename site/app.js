@@ -121,6 +121,7 @@
   }
   function playTypingSound(type = 'key') {
     const context = audioEngine(); if (!context) return;
+    if (soundVolume() <= 0) return;
     const now = context.currentTime, variation = 0.96 + Math.random() * 0.08;
     if (type === 'error') {
       addToneLayer(context, now, { type: 'triangle', from: 370, to: 235, duration: 0.17, gain: 0.16 });
