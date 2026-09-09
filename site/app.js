@@ -15,7 +15,7 @@
   let speechWatchdog, speechStartTimer, wrongReplayTimer, view = 'home', bookPage = 0, wrongPage = 0, historyPage = 0, invalidAnswer = false;
   let successTimer = 0, successState = null, historySessionId = null, historyWrongOnly = false;
   let vocabularyPageSize = gridPageSize(), layoutTimer = 0, peekTimer = 0, activePeek = null;
-  let audioContext = null, spellingErrorActive = false, pendingInputSound = '';
+  let audioContext = null, keyNoiseBuffer = null, spellingErrorActive = false, pendingInputSound = '';
   let pendingReleaseVersion = '', updateNoticeShown = false;
   const wrongSelection = new Set();
   let managingBookId = null, editingEntryId = null, batchPreview = [], singleIpaSource = 'unavailable', confusableIpaSource = 'unavailable';
@@ -88,14 +88,31 @@
     const now = context.currentTime, oscillator = context.createOscillator(), gain = context.createGain();
     oscillator.connect(gain); gain.connect(context.destination);
     if (type === 'error') {
-      oscillator.type = 'sine'; oscillator.frequency.setValueAtTime(520, now);
-      oscillator.frequency.exponentialRampToValueAtTime(390, now + 0.1);
-      gain.gain.setValueAtTime(0.055, now); gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
-      oscillator.start(now); oscillator.stop(now + 0.125);
+      oscillator.type = 'sine'; oscillator.frequency.setValueAtTime(640, now);
+      oscillator.frequency.exponentialRampToValueAtTime(400, now + 0.15);
+      gain.gain.setValueAtTime(0.12, now); gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
+      oscillator.start(now); oscillator.stop(now + 0.185);
     } else {
-      oscillator.type = 'triangle'; oscillator.frequency.setValueAtTime(1180, now);
-      gain.gain.setValueAtTime(0.022, now); gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.025);
-      oscillator.start(now); oscillator.stop(now + 0.03);
+      if (context.createBuffer && context.createBufferSource && context.createBiquadFilter) {
+        if (!keyNoiseBuffer) {
+          const length = Math.max(1, Math.floor(context.sampleRate * 0.038));
+          keyNoiseBuffer = context.createBuffer(1, length, context.sampleRate);
+          const samples = keyNoiseBuffer.getChannelData(0);
+          for (let index = 0; index < length; index++) {
+            const decay = Math.pow(1 - index / length, 2.4);
+            samples[index] = (Math.random() * 2 - 1) * decay;
+          }
+        }
+        const noise = context.createBufferSource(), filter = context.createBiquadFilter(), noiseGain = context.createGain();
+        noise.buffer = keyNoiseBuffer; filter.type = 'highpass'; filter.frequency.setValueAtTime(850, now);
+        noise.connect(filter); filter.connect(noiseGain); noiseGain.connect(context.destination);
+        noiseGain.gain.setValueAtTime(0.14, now); noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.038);
+        noise.start(now); noise.stop(now + 0.04);
+      }
+      oscillator.type = 'square'; oscillator.frequency.setValueAtTime(190, now);
+      oscillator.frequency.exponentialRampToValueAtTime(110, now + 0.04);
+      gain.gain.setValueAtTime(0.065, now); gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.045);
+      oscillator.start(now); oscillator.stop(now + 0.05);
     }
   }
   const typingText = (value) => String(value ?? '').normalize('NFKC').toLowerCase().replace(/[’‘]/g, "'");
