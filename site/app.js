@@ -15,7 +15,7 @@
   let speechWatchdog, speechStartTimer, wrongReplayTimer, view = 'home', bookPage = 0, wrongPage = 0, historyPage = 0, invalidAnswer = false;
   let successTimer = 0, successState = null, historySessionId = null, historyWrongOnly = false;
   let vocabularyPageSize = gridPageSize(), layoutTimer = 0, peekTimer = 0, activePeek = null;
-  let audioContext = null, keyNoiseBuffer = null, spellingErrorActive = false, pendingInputSound = '';
+  let audioContext = null, soundNoiseBuffers = new Map(), spellingErrorActive = false, pendingInputSound = '';
   let pendingReleaseVersion = '', updateNoticeShown = false;
   const wrongSelection = new Set();
   let managingBookId = null, editingEntryId = null, batchPreview = [], singleIpaSource = 'unavailable', confusableIpaSource = 'unavailable';
@@ -83,37 +83,68 @@
     if (audioContext.state === 'suspended') audioContext.resume?.();
     return audioContext;
   }
+  function soundVolume() {
+    const value = Number(engine.state.settings.typingSoundVolume);
+    return Math.max(0, Math.min(1.25, (Number.isFinite(value) ? value : 70) / 80));
+  }
+  function noiseBuffer(context, duration) {
+    const key = `${context.sampleRate}/${duration}`;
+    if (!soundNoiseBuffers.has(key)) {
+      const length = Math.max(1, Math.floor(context.sampleRate * duration));
+      const buffer = context.createBuffer(1, length, context.sampleRate), samples = buffer.getChannelData(0);
+      for (let index = 0; index < length; index++) {
+        const decay = Math.pow(1 - index / length, 2.8);
+        samples[index] = (Math.random() * 2 - 1) * decay;
+      }
+      soundNoiseBuffers.set(key, buffer);
+    }
+    return soundNoiseBuffers.get(key);
+  }
+  function addNoiseLayer(context, now, options) {
+    if (!context.createBuffer || !context.createBufferSource || !context.createBiquadFilter) return;
+    const source = context.createBufferSource(), filter = context.createBiquadFilter(), gain = context.createGain();
+    source.buffer = noiseBuffer(context, options.duration); filter.type = options.filter;
+    filter.frequency.setValueAtTime(options.frequency, now);
+    source.connect(filter); filter.connect(gain); gain.connect(context.destination);
+    gain.gain.setValueAtTime(Math.max(0.0001, options.gain * soundVolume()), now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + options.duration);
+    source.start(now); source.stop(now + options.duration + 0.004);
+  }
+  function addToneLayer(context, now, options) {
+    const oscillator = context.createOscillator(), gain = context.createGain(), start = now + (options.delay || 0);
+    oscillator.connect(gain); gain.connect(context.destination); oscillator.type = options.type;
+    oscillator.frequency.setValueAtTime(options.from, start);
+    oscillator.frequency.exponentialRampToValueAtTime(options.to, start + options.duration);
+    gain.gain.setValueAtTime(Math.max(0.0001, options.gain * soundVolume()), start);
+    gain.gain.exponentialRampToValueAtTime(0.0001, start + options.duration);
+    oscillator.start(start); oscillator.stop(start + options.duration + 0.005);
+  }
   function playTypingSound(type = 'key') {
     const context = audioEngine(); if (!context) return;
-    const now = context.currentTime, oscillator = context.createOscillator(), gain = context.createGain();
-    oscillator.connect(gain); gain.connect(context.destination);
+    const now = context.currentTime, variation = 0.96 + Math.random() * 0.08;
     if (type === 'error') {
-      oscillator.type = 'sine'; oscillator.frequency.setValueAtTime(640, now);
-      oscillator.frequency.exponentialRampToValueAtTime(400, now + 0.15);
-      gain.gain.setValueAtTime(0.12, now); gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.18);
-      oscillator.start(now); oscillator.stop(now + 0.185);
-    } else {
-      if (context.createBuffer && context.createBufferSource && context.createBiquadFilter) {
-        if (!keyNoiseBuffer) {
-          const length = Math.max(1, Math.floor(context.sampleRate * 0.038));
-          keyNoiseBuffer = context.createBuffer(1, length, context.sampleRate);
-          const samples = keyNoiseBuffer.getChannelData(0);
-          for (let index = 0; index < length; index++) {
-            const decay = Math.pow(1 - index / length, 2.4);
-            samples[index] = (Math.random() * 2 - 1) * decay;
-          }
-        }
-        const noise = context.createBufferSource(), filter = context.createBiquadFilter(), noiseGain = context.createGain();
-        noise.buffer = keyNoiseBuffer; filter.type = 'highpass'; filter.frequency.setValueAtTime(850, now);
-        noise.connect(filter); filter.connect(noiseGain); noiseGain.connect(context.destination);
-        noiseGain.gain.setValueAtTime(0.14, now); noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.038);
-        noise.start(now); noise.stop(now + 0.04);
-      }
-      oscillator.type = 'square'; oscillator.frequency.setValueAtTime(190, now);
-      oscillator.frequency.exponentialRampToValueAtTime(110, now + 0.04);
-      gain.gain.setValueAtTime(0.065, now); gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.045);
-      oscillator.start(now); oscillator.stop(now + 0.05);
+      addToneLayer(context, now, { type: 'triangle', from: 370, to: 235, duration: 0.17, gain: 0.16 });
+      return;
     }
+    const preset = ['typewriter', 'mechanical', 'soft'].includes(engine.state.settings.typingSoundPreset)
+      ? engine.state.settings.typingSoundPreset : 'typewriter';
+    if (preset === 'mechanical') {
+      addNoiseLayer(context, now, { duration: 0.032, filter: 'highpass', frequency: 560, gain: 0.12 });
+      addToneLayer(context, now, { type: 'square', from: 225 * variation, to: 145 * variation, duration: 0.035, gain: 0.052 });
+      addToneLayer(context, now, { type: 'triangle', from: 105 * variation, to: 75 * variation, duration: 0.05, gain: 0.055 });
+    } else if (preset === 'soft') {
+      addNoiseLayer(context, now, { duration: 0.03, filter: 'lowpass', frequency: 1350, gain: 0.075 });
+      addToneLayer(context, now, { type: 'sine', from: 125 * variation, to: 82 * variation, duration: 0.052, gain: 0.055 });
+    } else {
+      addNoiseLayer(context, now, { duration: 0.036, filter: 'lowpass', frequency: 2300, gain: 0.16 });
+      addToneLayer(context, now, { type: 'triangle', from: 145 * variation, to: 86 * variation, duration: 0.052, gain: 0.095 });
+      addToneLayer(context, now, { type: 'sine', from: 315 * variation, to: 185 * variation, duration: 0.038, delay: 0.007, gain: 0.038 });
+    }
+  }
+  function previewTypingSound() {
+    playTypingSound('key');
+    setTimeout(() => playTypingSound('key'), 105);
+    setTimeout(() => playTypingSound('key'), 210);
   }
   const typingText = (value) => String(value ?? '').normalize('NFKC').toLowerCase().replace(/[’‘]/g, "'");
   function typingStatus(row, answer) {
@@ -171,6 +202,19 @@
     setInterval(checkForUpdate, 30 * 60 * 1000);
   }
 
+  function syncSettingsControls() {
+    const settings = engine.state.settings, enabled = settings.typingSound !== false;
+    $('typingSoundToggle').checked = enabled;
+    $('typingSoundPreset').value = settings.typingSoundPreset || 'typewriter';
+    $('typingSoundVolume').value = String(settings.typingSoundVolume ?? 70);
+    $('typingSoundVolumeValue').value = `${settings.typingSoundVolume ?? 70}%`;
+    $('typingSoundControls').setAttribute('aria-disabled', String(!enabled));
+    for (const id of ['typingSoundPreset', 'typingSoundVolume', 'typingSoundPreview']) $(id).disabled = !enabled;
+    document.querySelectorAll('[data-repeat-mode]').forEach((button) => {
+      button.setAttribute('aria-pressed', String(button.dataset.repeatMode === String(settings.spellingRepeatMode || '1')));
+    });
+  }
+
   function populateBooks() {
     for (const target of [$('bookSelect'), $('libraryBookSelect')]) {
       target.replaceChildren();
@@ -190,7 +234,7 @@
     $('libraryBookSelect').value = engine.state.settings.libraryBookId;
     $('hideEnglish').checked = Boolean(engine.state.settings.hideEnglish);
     $('hideChinese').checked = Boolean(engine.state.settings.hideChinese);
-    $('typingSoundToggle').checked = engine.state.settings.typingSound !== false;
+    syncSettingsControls();
   }
 
   function cancelSpeech() {
@@ -343,7 +387,8 @@
     const focusRef = showingSuccess ? successState.ref : round.queue[round.index];
     const displayGroup = focusRef ? engine.groupForRef(focusRef, round) : null;
     const groupStart = displayGroup ? Math.min(...displayGroup.refs.map((ref) => round.queue.indexOf(ref)).filter((index) => index >= 0)) : -1;
-    const previousResultIndex = displayGroup ? groupStart - 1 : round.results.length - (showingSuccess ? 2 : 1);
+    const previousResultIndex = displayGroup ? groupStart - 1
+      : round.results.length - (showingSuccess && successState.advanced !== false ? 2 : 1);
     const previousResult = previousResultIndex >= 0 ? round.results[previousResultIndex] : null;
     const previous = previousResult ? engine.entry(previousResult.ref) : null;
     if (previous && !completeVisible) $('previousWord').innerHTML = `<button type="button" data-play="${esc(previousResult.ref)}" aria-label="重读上一词 ${esc(previous.word)}">${icon('corner-up-left')}${esc(previous.word)}</button><div class="ipa">${esc(previous.ipaUK)}</div><p>${esc(previous.translation)}</p>`;
@@ -356,8 +401,14 @@
     $('answerInput').classList.toggle('invalid', !showingSuccess && invalidAnswer);
     $('answerInput').classList.toggle('correct', showingSuccess);
     $('answerInput').setAttribute('aria-invalid', String(!showingSuccess && invalidAnswer));
-    $('answerFeedback').textContent = showingSuccess ? '拼写正确' : invalidAnswer ? (spelling ? '字符有误，请退格修改' : '拼写不正确') : '';
+    const repeat = spelling && !showingSuccess ? engine.spellingRepeatState(round) : null;
+    const repeatStatus = repeat?.count > 0
+      ? repeat.mode === 'infinite' ? `已完成 ${repeat.count} 次 · Enter 下一词` : `已完成 ${repeat.count} / 3 次`
+      : '';
+    $('answerFeedback').textContent = showingSuccess ? successState.message || '拼写正确'
+      : invalidAnswer ? (spelling ? '字符有误，请退格修改' : '拼写不正确') : repeatStatus;
     $('answerFeedback').classList.toggle('correct', showingSuccess);
+    $('answerFeedback').classList.toggle('repeat-status', !showingSuccess && !invalidAnswer && Boolean(repeatStatus));
     $('hintButton').hidden = spelling; $('hintButton').disabled = showingSuccess || spelling;
     renderAnswerArea(round, showingSuccess);
     $('progressBook').textContent = round.name || bookName(round.source); $('progressBar').max = Math.max(1, summary.total); $('progressBar').value = summary.done; $('progressCount').textContent = `${summary.done} / ${summary.total}`;
@@ -375,8 +426,9 @@
     if (!voices.length) { toast('请先选择可用的英式声音。'); return; }
     if (engine.start()) { invalidAnswer = false; spellingErrorActive = false; renderRound(); save(); focusAnswer(); speak(engine.current()); }
   }
-  function showCorrect(result, submittedRef, answer, delay) {
-    successState = { roundId: engine.round().id, ref: submittedRef, row: result.row, answer, complete: result.complete };
+  function showCorrect(result, submittedRef, answer, delay, options = {}) {
+    successState = { roundId: engine.round().id, ref: submittedRef, row: result.row, answer,
+      complete: result.complete, advanced: options.advanced !== false, message: options.message || '拼写正确' };
     spellingErrorActive = false; renderRound(); save();
     successTimer = setTimeout(() => {
       const state = successState; clearSuccess(); renderRound(); save(); focusAnswer();
@@ -409,8 +461,26 @@
     const row = engine.current(), answer = $('answerInput').value;
     if (!row || !typingStatus(row, answer).complete) return;
     const submittedRef = engine.round().queue[engine.round().index];
-    engine.setAnswer(answer); const result = engine.submit();
-    if (result.result === 'correct') showCorrect(result, submittedRef, answer, 600);
+    engine.setAnswer(answer); const result = engine.completeSpellingAttempt(answer);
+    if (result.result === 'repeat') {
+      const message = result.repeatMode === '3'
+        ? `第 ${result.repeatCount} / 3 次完成` : `已完成 ${result.repeatCount} 次`;
+      showCorrect(result, submittedRef, answer, 340, { advanced: false, message });
+    } else if (result.result === 'correct') {
+      const message = result.repeatMode === '3' ? '第 3 / 3 次完成' : '拼写正确';
+      showCorrect(result, submittedRef, answer, 600, { message });
+    }
+  }
+
+  function advanceInfiniteSpelling() {
+    if (successState || engine.round().mode !== 'spelling' || normalize($('answerInput').value)) return false;
+    const repeat = engine.spellingRepeatState();
+    if (repeat.mode !== 'infinite' || repeat.count < 1) return false;
+    const submittedRef = engine.round().queue[engine.round().index], answer = repeat.lastAnswer || engine.current()?.word || '';
+    const result = engine.finishInfiniteSpelling();
+    if (result.result !== 'correct') return false;
+    showCorrect(result, submittedRef, answer, 600, { message: `已完成 ${result.repeatCount} 次` });
+    return true;
   }
 
   function hint() {
@@ -705,7 +775,7 @@
   $('hintButton').onclick = hint;
   $('answerForm').addEventListener('submit', (event) => {
     event.preventDefault();
-    if (engine.round().mode === 'spelling') { finishSpelling(); return; }
+    if (engine.round().mode === 'spelling') { if (!advanceInfiniteSpelling()) finishSpelling(); return; }
     normalize($('answerInput').value) ? submit() : hint();
   });
   $('answerForm').addEventListener('pointerdown', () => { if (engine.round().mode === 'spelling') setTimeout(focusAnswer, 0); });
@@ -724,7 +794,7 @@
     }
     if (event.key === 'Enter' && !event.isComposing && event.keyCode !== 229) {
       event.preventDefault(); if (event.repeat) return;
-      if (engine.round().mode === 'spelling') { finishSpelling(); return; }
+      if (engine.round().mode === 'spelling') { if (!advanceInfiniteSpelling()) finishSpelling(); return; }
       normalize($('answerInput').value) ? submit() : hint();
     }
   });
@@ -825,8 +895,23 @@
   $('typingSoundToggle').onchange = () => {
     engine.state.settings.typingSound = $('typingSoundToggle').checked; save();
     if (!engine.state.settings.typingSound && audioContext?.state === 'running') audioContext.suspend?.();
+    syncSettingsControls();
     toast(engine.state.settings.typingSound ? '打字音效已开启' : '打字音效已关闭');
   };
+  $('typingSoundPreset').onchange = () => {
+    engine.state.settings.typingSoundPreset = $('typingSoundPreset').value; save(); previewTypingSound();
+  };
+  $('typingSoundVolume').oninput = () => {
+    const value = Math.max(0, Math.min(100, Number($('typingSoundVolume').value) || 0));
+    engine.state.settings.typingSoundVolume = value; $('typingSoundVolumeValue').value = `${value}%`; autosave();
+  };
+  $('typingSoundVolume').onchange = () => { save(); previewTypingSound(); };
+  $('typingSoundPreview').onclick = previewTypingSound;
+  document.querySelectorAll('[data-repeat-mode]').forEach((button) => button.onclick = () => {
+    const round = engine.round(), appliesNext = round.mode === 'spelling' && round.status === 'active';
+    engine.setSpellingRepeatMode(button.dataset.repeatMode); syncSettingsControls(); save(); renderRound();
+    toast(appliesNext ? '重复次数已保存，将从下一个词开始生效' : '重复次数已更新');
+  });
   document.querySelectorAll('[data-theme-option]').forEach((button) => button.onclick = () => { applyTheme(button.dataset.themeOption, true); closeThemePicker(true); });
   $('themePopover').addEventListener('keydown', (event) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;

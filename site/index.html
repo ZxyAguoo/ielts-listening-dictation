@@ -187,7 +187,13 @@
         <button id="settingsButton" class="icon-button" type="button" aria-label="练习设置" aria-expanded="false" aria-controls="settingsPopover" data-tooltip="练习设置"><svg><use href="#icon-settings"></use></svg></button>
         <div id="settingsPopover" class="settings-popover" aria-labelledby="settingsTitle" hidden>
           <span id="settingsTitle" class="settings-title">练习设置</span>
-          <label class="setting-row" for="typingSoundToggle"><span><strong>打字音效</strong><small>输入时播放轻微按键音</small></span><input id="typingSoundToggle" type="checkbox" role="switch"></label>
+          <label class="setting-row" for="typingSoundToggle"><span><strong>打字音效</strong><small>输入时播放按键音</small></span><input id="typingSoundToggle" type="checkbox" role="switch"></label>
+          <div id="typingSoundControls" class="setting-section">
+            <label class="setting-field" for="typingSoundPreset"><span>音效类型</span><select id="typingSoundPreset"><option value="typewriter">打字机</option><option value="mechanical">机械键盘</option><option value="soft">轻柔按键</option></select></label>
+            <label class="setting-volume" for="typingSoundVolume"><span>音效音量 <output id="typingSoundVolumeValue" for="typingSoundVolume">70%</output></span><input id="typingSoundVolume" type="range" min="0" max="100" step="1" value="70"></label>
+            <button id="typingSoundPreview" class="secondary-button setting-preview" type="button"><svg><use href="#icon-volume-2"></use></svg>试听音效</button>
+          </div>
+          <fieldset class="setting-section repeat-setting"><legend>拼写重复</legend><small>从下一个词开始生效</small><div class="repeat-options" role="group" aria-label="拼写重复次数"><button type="button" data-repeat-mode="1" aria-pressed="true">1次</button><button type="button" data-repeat-mode="3" aria-pressed="false">3次</button><button type="button" data-repeat-mode="infinite" aria-pressed="false">无限次</button></div></fieldset>
         </div>
       </div>
       <input id="importFile" type="file" accept=".json,application/json" hidden>

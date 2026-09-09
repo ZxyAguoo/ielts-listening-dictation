@@ -6,6 +6,10 @@
   const makeId = () => root.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
   const clone = (value) => JSON.parse(JSON.stringify(value));
   const cleanText = (value) => String(value ?? '').normalize('NFKC').replace(/\s+/g, ' ').trim();
+  const cleanRepeatMode = (value) => value === 'infinite' ? 'infinite' : String(value) === '3' ? '3' : '1';
+  const cleanSoundPreset = (value) => ['typewriter', 'mechanical', 'soft'].includes(value) ? value : 'typewriter';
+  const cleanSoundVolume = (value) => Number.isFinite(Number(value))
+    ? Math.max(0, Math.min(100, Math.round(Number(value)))) : 70;
   const safeKeys = (value) => value && typeof value === 'object' && !Array.isArray(value)
     && !Object.keys(value).some((k) => ['__proto__', 'prototype', 'constructor'].includes(k));
   const validWord = (item) => safeKeys(item) && typeof item.id === 'string'
@@ -16,10 +20,11 @@
     constructor(data, saved) {
       this.data = data;
       this.state = {
-        version: 3, revision: 5,
+        version: 3, revision: 6,
         settings: { bookId: data.books[0].id, libraryBookId: data.books[0].id,
           voiceURI: '', order: 'sequential', hideEnglish: false, hideChinese: false,
-          theme: 'lavender', wrongSort: 'desc', practiceMode: 'dictation', typingSound: true },
+          theme: 'lavender', wrongSort: 'desc', practiceMode: 'dictation', typingSound: true,
+          typingSoundPreset: 'typewriter', typingSoundVolume: 70, spellingRepeatMode: '1' },
         customBooks: [], rounds: {}, sessions: {}, wrong: {}, records: [], migrated: false,
       };
       this.reindex();
@@ -50,7 +55,7 @@
         throw new Error('备份格式不正确');
       }
       const state = clone(saved);
-      state.revision = 5;
+      state.revision = 6;
       state.customBooks ||= [];
       if (!Array.isArray(state.customBooks)) throw new Error('自定义词书数据不完整');
       const knownBookIds = new Set(this.data.books.map((book) => book.id));
@@ -105,6 +110,9 @@
       state.settings.wrongSort = state.settings.wrongSort === 'asc' ? 'asc' : 'desc';
       state.settings.practiceMode = state.settings.practiceMode === 'spelling' ? 'spelling' : 'dictation';
       state.settings.typingSound = state.settings.typingSound !== false;
+      state.settings.typingSoundPreset = cleanSoundPreset(state.settings.typingSoundPreset);
+      state.settings.typingSoundVolume = cleanSoundVolume(state.settings.typingSoundVolume);
+      state.settings.spellingRepeatMode = cleanRepeatMode(state.settings.spellingRepeatMode);
       for (const [key, item] of Object.entries(state.wrong)) {
         if (!validWord(item) || key !== item.id || !Number.isSafeInteger(item.count) || item.count < 1
           || typeof item.lastAt !== 'string' || typeof item.lastAnswer !== 'string'
@@ -133,6 +141,12 @@
           || typeof round.question.hinted !== 'boolean'
           || round.results.length !== round.index) throw new Error('听写进度不完整');
         round.mode = round.mode === 'spelling' ? 'spelling' : 'dictation';
+        const currentRef = round.status === 'complete' ? null : round.queue[round.index] || null;
+        const repeat = round.spellingRepeat;
+        round.spellingRepeat = safeKeys(repeat) && repeat.ref === currentRef
+          && Number.isSafeInteger(repeat.count) && repeat.count >= 0 && typeof repeat.lastAnswer === 'string'
+          ? { ref: currentRef, mode: cleanRepeatMode(repeat.mode), count: Math.min(repeat.count, 999999), lastAnswer: repeat.lastAnswer }
+          : { ref: currentRef, mode: state.settings.spellingRepeatMode, count: 0, lastAnswer: '' };
         if (round.legacyEntries && (!safeKeys(round.legacyEntries)
           || Object.values(round.legacyEntries).some((item) => !validWord(item)))) throw new Error('旧版词条快照不完整');
         round.groupSnapshots ||= [];
@@ -450,6 +464,7 @@
         parentId: options.parentId || null, reviewDepth: options.reviewDepth || 0,
         selectedWrongCount: options.selectedWrongCount || 0,
         answer: '', status: 'ready', question: { counted: false, hinted: false },
+        spellingRepeat: { ref: queue[0] || null, mode: cleanRepeatMode(this.state.settings.spellingRepeatMode), count: 0, lastAnswer: '' },
         invalid: false, results: [], startedAt: null, completedAt: null };
       return this.state.rounds[source];
     }
@@ -476,6 +491,9 @@
       let round = this.round();
       if (round.status === 'complete') round = this.restart();
       if (!round.queue.length) return false;
+      if (round.status === 'ready') round.spellingRepeat = {
+        ref: round.queue[round.index] || null, mode: cleanRepeatMode(this.state.settings.spellingRepeatMode), count: 0, lastAnswer: '',
+      };
       round.status = 'active';
       round.startedAt ||= stamp();
       this.state.sessions[round.id] = this.sessionMetadata(round);
@@ -493,6 +511,54 @@
       this.state.settings.practiceMode = mode;
       if (this.round().mode !== mode) return this.restart(this.round().order, mode);
       return this.round();
+    }
+
+    setSpellingRepeatMode(mode) {
+      const selected = cleanRepeatMode(mode);
+      this.state.settings.spellingRepeatMode = selected;
+      const round = this.round();
+      if (round.mode !== 'spelling' || round.status !== 'active') round.spellingRepeat = {
+        ref: round.status === 'complete' ? null : round.queue[round.index] || null,
+        mode: selected, count: 0, lastAnswer: '',
+      };
+      return selected;
+    }
+
+    spellingRepeatState(round = this.round()) {
+      const ref = round.status === 'complete' ? null : round.queue[round.index] || null;
+      const repeat = round.spellingRepeat;
+      if (!safeKeys(repeat) || repeat.ref !== ref || !Number.isSafeInteger(repeat.count)
+        || repeat.count < 0 || typeof repeat.lastAnswer !== 'string') {
+        round.spellingRepeat = { ref, mode: cleanRepeatMode(this.state.settings.spellingRepeatMode), count: 0, lastAnswer: '' };
+      } else {
+        repeat.mode = cleanRepeatMode(repeat.mode);
+      }
+      return round.spellingRepeat;
+    }
+
+    completeSpellingAttempt(answer = this.round().answer) {
+      const round = this.round(), row = this.current();
+      round.answer = String(answer);
+      if (round.mode !== 'spelling' || round.status !== 'active' || !row || !normalize(round.answer)) return { result: 'empty' };
+      if (!this.accepts(row, round.answer)) { round.invalid = true; return { result: 'typing', row }; }
+      const repeat = this.spellingRepeatState(round);
+      repeat.count += 1;
+      repeat.lastAnswer = round.answer;
+      const count = repeat.count, repeatMode = repeat.mode;
+      if (repeatMode === '1' || (repeatMode === '3' && count >= 3)) {
+        return { ...this.submit(), repeatCount: count, repeatMode };
+      }
+      round.answer = '';
+      round.invalid = false;
+      return { result: 'repeat', row, repeatCount: count, repeatMode, complete: false };
+    }
+
+    finishInfiniteSpelling() {
+      const round = this.round(), row = this.current(), repeat = this.spellingRepeatState(round);
+      if (round.mode !== 'spelling' || round.status !== 'active' || !row
+        || repeat.mode !== 'infinite' || repeat.count < 1 || normalize(round.answer)) return { result: 'empty' };
+      round.answer = repeat.lastAnswer || row.word;
+      return { ...this.submit(), repeatCount: repeat.count, repeatMode: repeat.mode };
     }
 
     restart(order = this.round().order, mode = this.round().mode || this.state.settings.practiceMode) {
@@ -551,12 +617,14 @@
     record(result) {
       const round = this.round(), row = this.current();
       const group = this.currentGroup();
+      const repeat = round.mode === 'spelling' ? this.spellingRepeatState(round) : null;
       this.state.records.unshift({ id: makeId(), roundId: round.id, questionId: `${round.id}/${round.index}`,
         wordId: row.id, word: row.word, ref: round.queue[round.index], bookId: round.source,
         bookName: round.name || this.books.get(round.source)?.name || '错题本', answer: round.answer,
         correctAnswer: row.word, result, at: stamp(), confusableGroupId: group?.id || null,
         confusableIndex: group ? group.refs.indexOf(round.queue[round.index]) : null, confusableSize: group?.refs.length || null,
-        mode: round.mode === 'spelling' ? 'spelling' : 'dictation' });
+        mode: round.mode === 'spelling' ? 'spelling' : 'dictation',
+        spellingRepeatMode: repeat?.mode || null, spellingRepeatCount: repeat ? Math.max(1, repeat.count) : null });
     }
 
     markWrong(reason) {
@@ -609,8 +677,10 @@
         return { result: 'wrong', row };
       }
       this.record('correct');
+      const repeat = round.mode === 'spelling' ? this.spellingRepeatState(round) : null;
       round.results.push({ ref: round.queue[round.index], answer: round.answer,
-        firstTry: !round.question.counted, hinted: round.question.hinted });
+        firstTry: !round.question.counted, hinted: round.question.hinted,
+        spellingRepeatMode: repeat?.mode || null, spellingRepeatCount: repeat ? Math.max(1, repeat.count) : null });
       round.index++;
       round.answer = '';
       round.invalid = false;
@@ -619,6 +689,8 @@
         round.status = 'complete';
         round.completedAt = stamp();
       }
+      round.spellingRepeat = { ref: round.status === 'complete' ? null : round.queue[round.index] || null,
+        mode: cleanRepeatMode(this.state.settings.spellingRepeatMode), count: 0, lastAnswer: '' };
       this.state.sessions[round.id] = this.sessionMetadata(round);
       return { result: 'correct', row, complete: round.status === 'complete' };
     }
