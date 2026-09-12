@@ -14,6 +14,7 @@
   let storageError = '', toastTimer, saveTimer, voices = [], speechToken = 0, currentUtterance = null;
   let speechWatchdog, speechStartTimer, wrongReplayTimer, view = 'home', bookPage = 0, wrongPage = 0, historyPage = 0, invalidAnswer = false;
   let successTimer = 0, successState = null, historySessionId = null, historyWrongOnly = false;
+  let hintTimer = 0, visibleHint = null;
   let vocabularyPageSize = gridPageSize(), layoutTimer = 0, peekTimer = 0, activePeek = null;
   let audioContext = null, soundNoiseBuffers = new Map(), spellingErrorActive = false, pendingInputSound = '';
   let pendingReleaseVersion = '', updateNoticeShown = false;
@@ -205,6 +206,7 @@
 
   function syncSettingsControls() {
     const settings = engine.state.settings, enabled = settings.typingSound !== false;
+    $('autoHintToggle').checked = settings.autoHint !== false;
     $('typingSoundToggle').checked = enabled;
     $('typingSoundPreset').value = settings.typingSoundPreset || 'typewriter';
     $('typingSoundVolume').value = String(settings.typingSoundVolume ?? 70);
@@ -301,8 +303,36 @@
 
   function clearSuccess() {
     clearTimeout(successTimer); successTimer = 0; successState = null;
+    clearVisibleHint();
     spellingErrorActive = false; pendingInputSound = '';
     $('answerInput').readOnly = false; $('answerInput').classList.remove('correct');
+  }
+
+  function clearVisibleHint(shouldRender = false) {
+    clearTimeout(hintTimer); hintTimer = 0; visibleHint = null;
+    if (shouldRender && view === 'home') {
+      const restoreFocus = document.activeElement === $('answerInput');
+      renderRound();
+      if (restoreFocus) focusAnswer();
+    }
+  }
+
+  function showVisibleHint(duration = 3000) {
+    const round = engine.round(), ref = round.queue[round.index];
+    if (round.status !== 'active' || !ref) return;
+    clearTimeout(hintTimer);
+    visibleHint = { roundId: round.id, ref };
+    hintTimer = setTimeout(() => {
+      hintTimer = 0;
+      if (!visibleHint || visibleHint.roundId !== round.id || visibleHint.ref !== ref) return;
+      visibleHint = null;
+      const currentRound = engine.round();
+      if (view === 'home' && currentRound.id === round.id && currentRound.queue[currentRound.index] === ref && !successState) {
+        const restoreFocus = document.activeElement === $('answerInput');
+        renderRound();
+        if (restoreFocus) focusAnswer();
+      }
+    }, duration);
   }
 
   function setView(next) {
@@ -406,7 +436,9 @@
     const previous = previousResult ? engine.entry(previousResult.ref) : null;
     if (previous && !completeVisible) $('previousWord').innerHTML = `<button type="button" data-play="${esc(previousResult.ref)}" aria-label="重读上一词 ${esc(previous.word)}">${icon('corner-up-left')}${esc(previous.word)}</button><div class="ipa">${esc(previous.ipaUK)}</div><p>${esc(previous.translation)}</p>`;
     const row = showingSuccess ? successState.row : engine.current();
-    $('hintAnswer').innerHTML = !spelling && !showingSuccess && round.question.hinted && row ? `<span>${esc(row.word)}</span><span class="ipa">${esc(row.ipaUK)}</span>` : '';
+    const hintVisible = visibleHint?.roundId === round.id && visibleHint.ref === round.queue[round.index];
+    $('hintAnswer').innerHTML = !spelling && !showingSuccess && hintVisible && row
+      ? `<span>${esc(row.word)}</span>${row.ipaUK ? `<span class="ipa">${esc(row.ipaUK)}</span>` : ''}<span class="hint-translation">${esc(row.translation)}</span>` : '';
     $('answerInput').value = showingSuccess ? successState.answer : round.answer;
     $('answerInput').readOnly = showingSuccess;
     const liveTyping = spelling && !showingSuccess && row ? typingStatus(row, round.answer) : { wrong: false };
@@ -440,6 +472,7 @@
     if (engine.start()) { invalidAnswer = false; spellingErrorActive = false; renderRound(); save(); focusAnswer(); speak(engine.current()); }
   }
   function showCorrect(result, submittedRef, answer, delay, options = {}) {
+    clearVisibleHint();
     successState = { roundId: engine.round().id, ref: submittedRef, row: result.row, answer,
       complete: result.complete, advanced: options.advanced !== false, message: options.message || '拼写正确' };
     spellingErrorActive = false; renderRound(); save();
@@ -458,7 +491,7 @@
     } else {
       playTypingSound('error');
       const roundId = engine.round().id;
-      engine.hint();
+      if (engine.state.settings.autoHint !== false) { engine.hint(); showVisibleHint(); }
       engine.round().invalid = true;
       invalidAnswer = true;
       renderRound(); save(); focusAnswer();
@@ -495,7 +528,7 @@
 
   function hint() {
     if (successState || engine.round().status !== 'active') return;
-    engine.setAnswer($('answerInput').value); engine.hint(); invalidAnswer = false; renderRound(); save(); focusAnswer();
+    engine.setAnswer($('answerInput').value); engine.hint(); showVisibleHint(); invalidAnswer = false; renderRound(); save(); focusAnswer();
   }
   function paginate(target, total, page, onChange, pageSize = PAGE_SIZE) {
     const pages = Math.max(1, Math.ceil(total / pageSize));
@@ -897,7 +930,13 @@
   $('settingsButton').onclick = () => {
     closeThemePicker();
     const opening = $('settingsPopover').hidden; $('settingsPopover').hidden = !opening; $('settingsButton').setAttribute('aria-expanded', String(opening));
-    if (opening) $('typingSoundToggle').focus();
+    if (opening) $('autoHintToggle').focus();
+  };
+  $('autoHintToggle').onchange = () => {
+    engine.state.settings.autoHint = $('autoHintToggle').checked;
+    if (!engine.state.settings.autoHint) clearVisibleHint(true);
+    save(); syncSettingsControls();
+    toast(engine.state.settings.autoHint ? '错误后自动提示已开启' : '错误后自动提示已关闭');
   };
   $('typingSoundToggle').onchange = () => {
     engine.state.settings.typingSound = $('typingSoundToggle').checked; save();

@@ -20,11 +20,11 @@
     constructor(data, saved) {
       this.data = data;
       this.state = {
-        version: 3, revision: 6,
+        version: 3, revision: 7,
         settings: { bookId: data.books[0].id, libraryBookId: data.books[0].id,
           voiceURI: '', order: 'sequential', hideEnglish: false, hideChinese: false,
           theme: 'lavender', wrongSort: 'desc', practiceMode: 'dictation', typingSound: true,
-          typingSoundPreset: 'typewriter', typingSoundVolume: 70, spellingRepeatMode: '1' },
+          typingSoundPreset: 'typewriter', typingSoundVolume: 70, spellingRepeatMode: '1', autoHint: true },
         customBooks: [], rounds: {}, sessions: {}, wrong: {}, records: [], migrated: false,
       };
       this.reindex();
@@ -55,7 +55,7 @@
         throw new Error('备份格式不正确');
       }
       const state = clone(saved);
-      state.revision = 6;
+      state.revision = 7;
       state.customBooks ||= [];
       if (!Array.isArray(state.customBooks)) throw new Error('自定义词书数据不完整');
       const knownBookIds = new Set(this.data.books.map((book) => book.id));
@@ -113,6 +113,7 @@
       state.settings.typingSoundPreset = cleanSoundPreset(state.settings.typingSoundPreset);
       state.settings.typingSoundVolume = cleanSoundVolume(state.settings.typingSoundVolume);
       state.settings.spellingRepeatMode = cleanRepeatMode(state.settings.spellingRepeatMode);
+      state.settings.autoHint = state.settings.autoHint !== false;
       for (const [key, item] of Object.entries(state.wrong)) {
         if (!validWord(item) || key !== item.id || !Number.isSafeInteger(item.count) || item.count < 1
           || typeof item.lastAt !== 'string' || typeof item.lastAnswer !== 'string'
