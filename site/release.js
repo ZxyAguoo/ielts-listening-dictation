@@ -1,1 +1,1 @@
-window.APP_RELEASE = {"version":"2026.09.12-6c2200f95c","channel":"github-pages","auth":false};
+window.APP_RELEASE = {"version":"2026.09.12-9f7c0c3d46","channel":"github-pages","auth":false};
