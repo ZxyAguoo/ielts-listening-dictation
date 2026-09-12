@@ -291,12 +291,12 @@ main{width:100%;height:100%;min-height:0;overflow:hidden}
 .spelling-mode #answerInput{position:absolute;left:50%;bottom:0;width:1px!important;height:1px!important;min-height:1px!important;padding:0;border:0;opacity:0;overflow:hidden;pointer-events:none}
 .spelling-prompt{width:100%;min-width:0}
 .spelling-target{min-width:0;text-align:center}
-.spelling-characters{display:flex;align-items:baseline;justify-content:center;flex-wrap:wrap;min-width:0;color:var(--ink);font-size:42px;font-weight:500;line-height:1.35}
+.spelling-characters{display:flex;align-items:baseline;justify-content:center;flex-wrap:wrap;gap:0 .08em;min-width:0;color:var(--ink);font-family:ui-monospace,"Cascadia Mono","SFMono-Regular",Menlo,Consolas,"Liberation Mono",monospace;font-size:42px;font-variant-ligatures:none;font-weight:500;letter-spacing:0;line-height:1.35}
 .spelling-target.word-long .spelling-characters{font-size:34px}.spelling-target.word-very-long .spelling-characters{font-size:27px}
-.spelling-char{display:inline-block;min-width:.56em;border-bottom:2px solid transparent;transition:color .1s ease,border-color .1s ease}
+.spelling-char{display:inline-flex;flex:0 0 1ch;width:1ch;min-width:1ch;justify-content:center;border-bottom:2px solid transparent;transition:color .1s ease,border-color .1s ease}
 .spelling-char.correct{color:var(--green)}.spelling-char.wrong{color:var(--red)}.spelling-char.pending{color:var(--ink)}
-.spelling-char.current{border-bottom-color:var(--accent)}.spelling-char.extra{min-width:auto}
-.space-mark{display:inline-block;width:.72em;color:var(--muted);font-size:.72em;text-align:center}
+.spelling-char.current{border-bottom-color:var(--accent)}.spelling-char.extra{min-width:1ch}
+.space-mark{display:inline-block;width:100%;color:var(--muted);font-size:.72em;text-align:center}
 .spelling-char.correct .space-mark{color:var(--green)}.spelling-char.wrong .space-mark{color:var(--red)}
 .spelling-ipa{display:block;margin-top:12px;color:var(--muted);font-size:14px;line-height:1.5}
 .spelling-target p{margin-top:10px;color:var(--ink);font-size:16px;font-weight:500;line-height:1.55;overflow-wrap:anywhere}

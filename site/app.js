@@ -243,6 +243,18 @@
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     currentUtterance = null; document.querySelectorAll('.speaking').forEach((el) => { el.classList.remove('speaking'); el.removeAttribute('aria-busy'); });
   }
+  function speechIsBusy() {
+    const synthesis = 'speechSynthesis' in window ? window.speechSynthesis : null;
+    return Boolean(currentUtterance || synthesis?.speaking || synthesis?.pending);
+  }
+  function scheduleWrongReplay(roundId, ref, delay) {
+    clearTimeout(wrongReplayTimer);
+    wrongReplayTimer = setTimeout(() => {
+      const round = engine.round();
+      if (view === 'home' && round.status === 'active' && round.id === roundId
+        && round.queue[round.index] === ref && !speechIsBusy()) speak(engine.current());
+    }, delay);
+  }
   function selectedVoice() { return voices.find((v) => v.voiceURI === engine.state.settings.voiceURI) || voices[0]; }
   function speak(row, control) {
     refreshVoices(false);
@@ -450,10 +462,7 @@
       engine.round().invalid = true;
       invalidAnswer = true;
       renderRound(); save(); focusAnswer();
-      wrongReplayTimer = setTimeout(() => {
-        const round = engine.round();
-        if (view === 'home' && round.status === 'active' && round.id === roundId && round.queue[round.index] === submittedRef) speak(engine.current());
-      }, 180);
+      scheduleWrongReplay(roundId, submittedRef, 180);
     }
   }
 
@@ -806,11 +815,8 @@
       spellingErrorActive = status.wrong; invalidAnswer = status.wrong;
       if (status.wrong && !wasWrong) {
         if (pendingInputSound !== 'error') playTypingSound('error');
-        const roundId = round.id, ref = round.queue[round.index]; clearTimeout(wrongReplayTimer);
-        wrongReplayTimer = setTimeout(() => {
-          const active = engine.round();
-          if (view === 'home' && active.status === 'active' && active.id === roundId && active.queue[active.index] === ref) speak(engine.current());
-        }, 90);
+        const roundId = round.id, ref = round.queue[round.index];
+        scheduleWrongReplay(roundId, ref, 90);
       }
       pendingInputSound = '';
       if (status.complete) { finishSpelling(); return; }
